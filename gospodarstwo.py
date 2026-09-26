@@ -658,6 +658,9 @@ with tab1:
             nazwa = c1.text_input("Nazwa pola*")
             powierzchnia = c2.number_input("Powierzchnia (ha)*", min_value=0.0, step=0.1)
             rodzaj = c3.selectbox("Rodzaj uprawy*", RODZAJE_UPRAW)
+            rodzaj_wlasny = st.text_input(
+                "Inny rodzaj uprawy (opcjonalnie)", placeholder="Wpisz, jeśli nie ma go na liście powyżej — nadpisze wybór",
+                key="rodzaj_wlasny_dodaj")
             c4, c5, c6 = st.columns(3)
             odmiana = c4.text_input("Odmiana")
             rok = c5.number_input("Rok", min_value=2020, max_value=2035, value=dzis().year, step=1)
@@ -680,8 +683,9 @@ with tab1:
                             fid = wgraj_zdjecie(plik)
                             if fid:
                                 ids_zdjec.append(fid)
+                rodzaj_ostateczny = rodzaj_wlasny.strip() if rodzaj_wlasny.strip() else rodzaj
                 nowy = {"ID": 0, "Nazwa pola": nazwa.strip(), "Powierzchnia (ha)": powierzchnia,
-                        "Rodzaj uprawy": rodzaj, "Odmiana": odmiana.strip(), "Rok": int(rok),
+                        "Rodzaj uprawy": rodzaj_ostateczny, "Odmiana": odmiana.strip(), "Rok": int(rok),
                         "Data siewu": data_siewu, "Status": status, "Gleba": gleba,
                         "Notatka": notatka.strip(), "Zdjęcia": ",".join(ids_zdjec), "Usunięte": False}
                 zapisz_pola(pd.concat([st.session_state.pola, pd.DataFrame([nowy])], ignore_index=True))
@@ -703,6 +707,10 @@ with tab1:
                                                   value=float(wiersz["Powierzchnia (ha)"]))
                 rodzaj_e = c3.selectbox("Rodzaj uprawy*", RODZAJE_UPRAW,
                                          index=RODZAJE_UPRAW.index(wiersz["Rodzaj uprawy"]) if wiersz["Rodzaj uprawy"] in RODZAJE_UPRAW else 0)
+                rodzaj_wlasny_e = st.text_input(
+                    "Inny rodzaj uprawy (opcjonalnie)", placeholder="Wpisz, jeśli nie ma go na liście powyżej — nadpisze wybór",
+                    value=wiersz["Rodzaj uprawy"] if wiersz["Rodzaj uprawy"] not in RODZAJE_UPRAW else "",
+                    key=f"rodzaj_wlasny_edytuj_{wybrane_id}")
                 c4, c5, c6 = st.columns(3)
                 odmiana_e = c4.text_input("Odmiana", value=wiersz["Odmiana"])
                 rok_e = c5.number_input("Rok", min_value=2020, max_value=2035,
@@ -748,11 +756,12 @@ with tab1:
                     usun_zdjecie(fid)
                 wszystkie_zdjecia = zostawione + nowe_id_zdjec
 
+                rodzaj_e_ostateczny = rodzaj_wlasny_e.strip() if rodzaj_wlasny_e.strip() else rodzaj_e
                 df = st.session_state.pola.copy()
                 maska = df["ID"] == wybrane_id
                 df.loc[maska, ["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
                                 "Data siewu", "Status", "Gleba", "Notatka", "Zdjęcia"]] = \
-                    [nazwa_e.strip(), powierzchnia_e, rodzaj_e, odmiana_e.strip(), int(rok_e),
+                    [nazwa_e.strip(), powierzchnia_e, rodzaj_e_ostateczny, odmiana_e.strip(), int(rok_e),
                      data_siewu_e, status_e, gleba_e, notatka_e.strip(), ",".join(wszystkie_zdjecia)]
                 zapisz_pola(df)
                 st.success("Zapisano zmiany.")
@@ -829,6 +838,9 @@ with tab2:
                 c1, c2 = st.columns(2)
                 pole_z = c1.selectbox("Pole*", nazwy_pol)
                 typ_z = c2.selectbox("Typ*", TYPY_ZABIEGOW)
+                typ_wlasny_z = st.text_input(
+                    "Inny typ zabiegu (opcjonalnie)", placeholder="Wpisz, jeśli nie ma go na liście powyżej — nadpisze wybór",
+                    key="typ_wlasny_dodaj")
                 c3, c4, c5 = st.columns(3)
                 srodek_z = c3.text_input("Środek/Nawóz*")
                 dawka_z = c4.number_input("Dawka", min_value=0.0, step=0.1)
@@ -844,7 +856,8 @@ with tab2:
                 if not srodek_z.strip():
                     st.error("Podaj nazwę środka/nawozu.")
                 else:
-                    nowy = {"ID": 0, "Pole": pole_z, "Typ": typ_z, "Środek/Nawóz": srodek_z.strip(),
+                    typ_z_ostateczny = typ_wlasny_z.strip() if typ_wlasny_z.strip() else typ_z
+                    nowy = {"ID": 0, "Pole": pole_z, "Typ": typ_z_ostateczny, "Środek/Nawóz": srodek_z.strip(),
                             "Dawka": dawka_z, "Jednostka": jednostka_z, "Data planowana": data_plan_z,
                             "Data wykonania": data_wyk_z, "Wykonano?": wykonano_z, "Koszt (zł)": koszt_z,
                             "Notatka": notatka_z.strip()}
@@ -866,6 +879,10 @@ with tab2:
                                            index=nazwy_pol.index(wiersz["Pole"]) if wiersz["Pole"] in nazwy_pol else 0)
                     typ_e = c2.selectbox("Typ*", TYPY_ZABIEGOW,
                                           index=TYPY_ZABIEGOW.index(wiersz["Typ"]) if wiersz["Typ"] in TYPY_ZABIEGOW else 0)
+                    typ_wlasny_e = st.text_input(
+                        "Inny typ zabiegu (opcjonalnie)", placeholder="Wpisz, jeśli nie ma go na liście powyżej — nadpisze wybór",
+                        value=wiersz["Typ"] if wiersz["Typ"] not in TYPY_ZABIEGOW else "",
+                        key=f"typ_wlasny_edytuj_{wybrane_id}")
                     c3, c4, c5 = st.columns(3)
                     srodek_e = c3.text_input("Środek/Nawóz*", value=wiersz["Środek/Nawóz"])
                     dawka_e = c4.number_input("Dawka", min_value=0.0, step=0.1, value=float(wiersz["Dawka"] or 0))
@@ -883,11 +900,12 @@ with tab2:
                     zapisz_btn = b1.form_submit_button("💾 Zapisz zmiany", type="primary", use_container_width=True)
                     usun_btn = b2.form_submit_button("🗑️ Usuń zabieg", use_container_width=True)
                 if zapisz_btn:
+                    typ_e_ostateczny = typ_wlasny_e.strip() if typ_wlasny_e.strip() else typ_e
                     df = st.session_state.zabiegi.copy()
                     maska = df["ID"] == wybrane_id
                     df.loc[maska, ["Pole", "Typ", "Środek/Nawóz", "Dawka", "Jednostka", "Data planowana",
                                     "Data wykonania", "Wykonano?", "Koszt (zł)", "Notatka"]] = \
-                        [pole_e, typ_e, srodek_e.strip(), dawka_e, jednostka_e, data_plan_e,
+                        [pole_e, typ_e_ostateczny, srodek_e.strip(), dawka_e, jednostka_e, data_plan_e,
                          data_wyk_e, wykonano_e, koszt_e, notatka_e.strip()]
                     zapisz_zabiegi(df)
                     st.success("Zapisano zmiany.")
