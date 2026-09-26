@@ -925,14 +925,18 @@ with tab3:
         for _, w in st.session_state.zbiory.iterrows():
             powierzchnia = pow_mapa.get(w["Pole"], 0.0)
             plon_t_ha = w["Plon (t/ha)"] if pd.notna(w["Plon (t/ha)"]) else None
-            plon_total = plon_t_ha * powierzchnia if plon_t_ha is not None else None
             cena = w["Cena (zł/t)"] if pd.notna(w["Cena (zł/t)"]) else 0
-            przychod = plon_total * cena if plon_total is not None else None
+            # Przychód z 1 ha - niezależny od wielkości pola, do porównania opłacalności upraw
+            przychod_z_ha = plon_t_ha * cena if plon_t_ha is not None else None
+            plon_total = plon_t_ha * powierzchnia if plon_t_ha is not None else None
+            przychod_calkowity = przychod_z_ha * powierzchnia if przychod_z_ha is not None else None
             wiersze.append({
                 "Pole": w["Pole"], "Powierzchnia (ha)": powierzchnia,
-                "Plon (t/ha)": plon_t_ha, "Plon łącznie (t)": plon_total,
-                "Cena (zł/t)": cena, "Przychód (zł)": przychod,
-                "Zrealizowane?": w["Zrealizowane?"],
+                "Plon (t/ha)": plon_t_ha, "Cena (zł/t)": cena,
+                "Przychód z 1 ha (zł/ha)": przychod_z_ha,
+                "Plon łącznie (t)": plon_total,
+                "Przychód całkowity (zł)": przychod_calkowity,
+                "Zrealizowane?": bool(w["Zrealizowane?"]),
             })
         tabela_plonow = pd.DataFrame(wiersze)
         if tabela_plonow.empty:
@@ -941,18 +945,27 @@ with tab3:
             st.dataframe(
                 tabela_plonow, hide_index=True, use_container_width=True,
                 height=wysokosc_tabeli(len(tabela_plonow)),
+                column_order=["Pole", "Powierzchnia (ha)", "Plon (t/ha)", "Cena (zł/t)",
+                              "Przychód z 1 ha (zł/ha)", "Plon łącznie (t)", "Przychód całkowity (zł)",
+                              "Zrealizowane?"],
                 column_config={
                     "Powierzchnia (ha)": st.column_config.NumberColumn(format="%.2f"),
                     "Plon (t/ha)": st.column_config.NumberColumn(format="%.2f"),
-                    "Plon łącznie (t)": st.column_config.NumberColumn(format="%.2f"),
                     "Cena (zł/t)": st.column_config.NumberColumn(format="%.2f zł"),
-                    "Przychód (zł)": st.column_config.NumberColumn(format="%.2f zł"),
-                    "Zrealizowane?": st.column_config.CheckboxColumn(),
+                    "Przychód z 1 ha (zł/ha)": st.column_config.NumberColumn(
+                        format="%.2f zł", help="Plon (t/ha) × Cena (zł/t) — przychód planowany lub uzyskany z 1 ha, niezależnie od wielkości pola."),
+                    "Plon łącznie (t)": st.column_config.NumberColumn(format="%.2f"),
+                    "Przychód całkowity (zł)": st.column_config.NumberColumn(format="%.2f zł"),
+                    "Zrealizowane?": st.column_config.CheckboxColumn("Zrealizowane?"),
                 },
             )
+            m1, m2 = st.columns(2)
             zrealizowane = tabela_plonow[tabela_plonow["Zrealizowane?"] == True]
-            if not zrealizowane.empty:
-                st.metric("💰 Przychód ze zrealizowanych zbiorów", zl(zrealizowane["Przychód (zł)"].fillna(0).sum(), True))
+            planowane = tabela_plonow[tabela_plonow["Zrealizowane?"] == False]
+            m1.metric("💰 Przychód ze zrealizowanych zbiorów",
+                      zl(zrealizowane["Przychód całkowity (zł)"].fillna(0).sum(), True))
+            m2.metric("📌 Przychód planowany (jeszcze niezrealizowany)",
+                      zl(planowane["Przychód całkowity (zł)"].fillna(0).sum(), True))
 
 
 # ======================================================================
