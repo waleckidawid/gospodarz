@@ -184,7 +184,7 @@ SCHEMAT_ZABIEGI = {
 }
 SCHEMAT_ZBIORY = {
     "kolumny": ["ID", "Pole", "Data planowana", "Data zbioru", "Plon (t/ha)",
-                "Wilgotność (%)", "Cena (zł/t)", "Zrealizowane?", "Notatka"],
+                "Wilgotność (%)", "Cena (zł/t)", "Zrealizowane?", "Notatka", "Zdjęcia"],
     "bool": ["Zrealizowane?"], "liczby": ["Plon (t/ha)", "Wilgotność (%)", "Cena (zł/t)"],
     "daty": ["Data planowana", "Data zbioru"],
 }
@@ -489,10 +489,10 @@ def przykladowe_zbiory() -> pd.DataFrame:
     dane = [
         {"ID": 1, "Pole": "Nad rzeką", "Data planowana": date(2026, 8, 5), "Data zbioru": None,
          "Plon (t/ha)": None, "Wilgotność (%)": None, "Cena (zł/t)": 2200,
-         "Zrealizowane?": False, "Notatka": ""},
+         "Zrealizowane?": False, "Notatka": "", "Zdjęcia": ""},
         {"ID": 2, "Pole": "Za stodołą", "Data planowana": date(2026, 8, 1), "Data zbioru": None,
          "Plon (t/ha)": None, "Wilgotność (%)": None, "Cena (zł/t)": 950,
-         "Zrealizowane?": False, "Notatka": ""},
+         "Zrealizowane?": False, "Notatka": "", "Zdjęcia": ""},
     ]
     return pd.DataFrame(dane)
 
@@ -591,6 +591,8 @@ KONFIG_ZBIORY_EDYCJA = {
     "Cena (zł/t)": st.column_config.NumberColumn(min_value=0.0, step=10.0, format="%.2f zł"),
     "Zrealizowane?": st.column_config.CheckboxColumn(default=False),
     "Notatka": st.column_config.TextColumn(),
+    "Zdjęcia": st.column_config.TextColumn(
+        disabled=True, help="Zarządzaj zdjęciami przez formularz „Dodaj/Edytuj zbiór” powyżej."),
 }
 
 
@@ -632,8 +634,9 @@ with st.sidebar:
 
 st.title("🌾 Zarządzanie gospodarstwem")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["🗺️ Pola", "🧪 Zabiegi (opryski i nawozy)", "🌾 Zbiory", "📅 Kalendarz prac", "📊 Podsumowanie"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["🗺️ Pola", "🧪 Zabiegi (opryski i nawozy)", "🌾 Zbiory", "📅 Kalendarz prac",
+     "📊 Podsumowanie", "🔍 Karta pola"]
 )
 
 edycja = st.session_state.edycja
@@ -962,11 +965,21 @@ with tab3:
                 wilgotnosc_zb = c6.number_input("Wilgotność (%)", min_value=0.0, max_value=100.0, step=0.5)
                 cena_zb = c7.number_input("Cena (zł/t)", min_value=0.0, step=10.0)
                 notatka_zb = st.text_area("Notatka", height=68)
+                zdjecia_nowe_zb = st.file_uploader("Zdjęcia zbioru (opcjonalnie)", type=["png", "jpg", "jpeg"],
+                                                    accept_multiple_files=True, key="upload_dodaj_zbior")
                 dodaj_zb = st.form_submit_button("➕ Dodaj zbiór", type="primary", use_container_width=True)
             if dodaj_zb:
+                ids_zdjec_zb = []
+                if zdjecia_nowe_zb:
+                    with st.spinner("Wgrywanie zdjęć..."):
+                        for plik in zdjecia_nowe_zb:
+                            fid = wgraj_zdjecie(plik)
+                            if fid:
+                                ids_zdjec_zb.append(fid)
                 nowy = {"ID": 0, "Pole": pole_zb, "Data planowana": data_plan_zb, "Data zbioru": data_zbioru_zb,
                         "Plon (t/ha)": plon_zb, "Wilgotność (%)": wilgotnosc_zb, "Cena (zł/t)": cena_zb,
-                        "Zrealizowane?": zrealizowane_zb, "Notatka": notatka_zb.strip()}
+                        "Zrealizowane?": zrealizowane_zb, "Notatka": notatka_zb.strip(),
+                        "Zdjęcia": ",".join(ids_zdjec_zb)}
                 zapisz_zbiory(pd.concat([st.session_state.zbiory, pd.DataFrame([nowy])], ignore_index=True))
                 st.success("Dodano zbiór.")
                 st.rerun()
@@ -978,6 +991,7 @@ with tab3:
                 wybrane_id = st.selectbox("Wybierz zbiór", options=list(etykiety), format_func=lambda i: etykiety[i],
                                            key="wybor_edycji_zbioru")
                 wiersz = st.session_state.zbiory[st.session_state.zbiory["ID"] == wybrane_id].iloc[0]
+                obecne_zdjecia_zb = lista_zdjec(wiersz["Zdjęcia"])
                 with st.form("edytuj_zbior"):
                     c1, c2 = st.columns(2)
                     pole_e = c1.selectbox("Pole*", nazwy_pol,
@@ -994,19 +1008,51 @@ with tab3:
                                                     value=float(wiersz["Wilgotność (%)"] or 0))
                     cena_e = c7.number_input("Cena (zł/t)", min_value=0.0, step=10.0, value=float(wiersz["Cena (zł/t)"] or 0))
                     notatka_e = st.text_area("Notatka", value=wiersz["Notatka"], height=68)
+
+                    flagi_usun_zdj_zb = []
+                    if obecne_zdjecia_zb:
+                        st.caption("Obecne zdjęcia — zaznacz „Usuń”, żeby skasować przy zapisie:")
+                        kol_zdj_zb = st.columns(min(len(obecne_zdjecia_zb), 4))
+                        for idx, fid in enumerate(obecne_zdjecia_zb):
+                            with kol_zdj_zb[idx % len(kol_zdj_zb)]:
+                                bajty = pobierz_bajty_zdjecia(fid)
+                                if bajty:
+                                    st.image(bajty, use_container_width=True)
+                                else:
+                                    st.caption("⚠️ Nie udało się wczytać zdjęcia")
+                                flagi_usun_zdj_zb.append(st.checkbox("Usuń", key=f"usun_zdj_zb_{wybrane_id}_{fid}"))
+                    zdjecia_nowe_zb_e = st.file_uploader("Dodaj nowe zdjęcia", type=["png", "jpg", "jpeg"],
+                                                          accept_multiple_files=True, key=f"upload_edytuj_zbior_{wybrane_id}")
+
                     b1, b2 = st.columns(2)
                     zapisz_btn = b1.form_submit_button("💾 Zapisz zmiany", type="primary", use_container_width=True)
                     usun_btn = b2.form_submit_button("🗑️ Usuń zbiór", use_container_width=True)
                 if zapisz_btn:
+                    zostawione_zb = [fid for fid, usun in zip(obecne_zdjecia_zb, flagi_usun_zdj_zb) if not usun]
+                    usuniete_zb = [fid for fid, usun in zip(obecne_zdjecia_zb, flagi_usun_zdj_zb) if usun]
+                    nowe_id_zdjec_zb = []
+                    if zdjecia_nowe_zb_e:
+                        with st.spinner("Wgrywanie zdjęć..."):
+                            for plik in zdjecia_nowe_zb_e:
+                                fid = wgraj_zdjecie(plik)
+                                if fid:
+                                    nowe_id_zdjec_zb.append(fid)
+                    for fid in usuniete_zb:
+                        usun_zdjecie(fid)
+                    wszystkie_zdjecia_zb = zostawione_zb + nowe_id_zdjec_zb
+
                     df = st.session_state.zbiory.copy()
                     maska = df["ID"] == wybrane_id
                     df.loc[maska, ["Pole", "Data planowana", "Data zbioru", "Plon (t/ha)", "Wilgotność (%)",
-                                    "Cena (zł/t)", "Zrealizowane?", "Notatka"]] = \
-                        [pole_e, data_plan_e, data_zbioru_e, plon_e, wilgotnosc_e, cena_e, zrealizowane_e, notatka_e.strip()]
+                                    "Cena (zł/t)", "Zrealizowane?", "Notatka", "Zdjęcia"]] = \
+                        [pole_e, data_plan_e, data_zbioru_e, plon_e, wilgotnosc_e, cena_e, zrealizowane_e,
+                         notatka_e.strip(), ",".join(wszystkie_zdjecia_zb)]
                     zapisz_zbiory(df)
                     st.success("Zapisano zmiany.")
                     st.rerun()
                 if usun_btn:
+                    for fid in obecne_zdjecia_zb:
+                        usun_zdjecie(fid)
                     df = st.session_state.zbiory[st.session_state.zbiory["ID"] != wybrane_id]
                     zapisz_zbiory(df)
                     st.success("Usunięto zbiór.")
@@ -1015,7 +1061,7 @@ with tab3:
         st.divider()
         st.subheader("Wszystkie zbiory")
         st.dataframe(
-            st.session_state.zbiory.drop(columns=["ID"]),
+            st.session_state.zbiory.drop(columns=["ID", "Zdjęcia"]),
             hide_index=True, use_container_width=True,
             height=wysokosc_tabeli(len(st.session_state.zbiory)),
             column_config=KONFIG_ZBIORY_EDYCJA,
@@ -1213,3 +1259,119 @@ with tab5:
         wg_statusu = df_pola_aktywne["Status"].value_counts().reset_index()
         wg_statusu.columns = ["Status", "Liczba pól"]
         st.dataframe(wg_statusu, hide_index=True, use_container_width=True)
+
+
+# ======================================================================
+# ZAKŁADKA 6 — KARTA POLA (pełna historia jednego pola: zabiegi + zbiory + zdjęcia)
+# ======================================================================
+
+with tab6:
+    st.subheader("Pełna historia wybranego pola")
+    if df_pola_aktywne.empty:
+        st.warning("Najpierw dodaj przynajmniej jedno pole w zakładce „Pola”.")
+    else:
+        etykiety_kp = {row["ID"]: f"{IKONY_STATUS.get(row['Status'], '🌾')} {row['Nazwa pola']} — {row['Rodzaj uprawy']}"
+                       for _, row in df_pola_aktywne.iterrows()}
+        wybrane_id_kp = st.selectbox("Wybierz pole", options=list(etykiety_kp),
+                                      format_func=lambda i: etykiety_kp[i], key="wybor_karta_pola")
+        pole_kp = df_pola_aktywne[df_pola_aktywne["ID"] == wybrane_id_kp].iloc[0]
+        nazwa_kp = pole_kp["Nazwa pola"]
+
+        zabiegi_kp = st.session_state.zabiegi[st.session_state.zabiegi["Pole"] == nazwa_kp]
+        zbiory_kp = st.session_state.zbiory[st.session_state.zbiory["Pole"] == nazwa_kp]
+
+        # ---- nagłówek: zdjęcia + podstawowe dane pola ----
+        zdjecia_kp = lista_zdjec(pole_kp["Zdjęcia"])
+        if zdjecia_kp:
+            kol_galeria = st.columns(min(len(zdjecia_kp), 5))
+            for idx, fid in enumerate(zdjecia_kp):
+                with kol_galeria[idx % len(kol_galeria)]:
+                    bajty = pobierz_bajty_zdjecia(fid)
+                    if bajty:
+                        st.image(bajty, use_container_width=True)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("📐 Powierzchnia", f"{pole_kp['Powierzchnia (ha)']:.2f} ha")
+        c2.metric("🌾 Uprawa", pole_kp["Rodzaj uprawy"])
+        c3.metric("📌 Status", pole_kp["Status"])
+        c4.metric("🌱 Siew", pole_kp["Data siewu"].strftime("%d.%m.%Y") if isinstance(pole_kp["Data siewu"], date) else "—")
+        if pole_kp["Odmiana"] or pole_kp["Gleba"] or pole_kp["Notatka"]:
+            opis_bits = []
+            if pole_kp["Odmiana"]:
+                opis_bits.append(f"Odmiana: {pole_kp['Odmiana']}")
+            if pole_kp["Gleba"]:
+                opis_bits.append(f"Gleba: {pole_kp['Gleba']}")
+            st.caption(" · ".join(opis_bits))
+            if pole_kp["Notatka"]:
+                st.caption(f"📝 {pole_kp['Notatka']}")
+
+        st.divider()
+
+        # ---- podsumowanie finansowe tylko dla tego pola ----
+        koszt_kp = zabiegi_kp["Koszt (zł)"].fillna(0).sum()
+        pow_kp = float(pole_kp["Powierzchnia (ha)"])
+        przychod_kp = 0.0
+        for _, w in zbiory_kp.iterrows():
+            if not w["Zrealizowane?"]:
+                continue
+            plon = w["Plon (t/ha)"] if pd.notna(w["Plon (t/ha)"]) else 0
+            cena = w["Cena (zł/t)"] if pd.notna(w["Cena (zł/t)"]) else 0
+            przychod_kp += plon * cena * pow_kp
+        bilans_kp = przychod_kp - koszt_kp
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("🧪 Liczba zabiegów", len(zabiegi_kp))
+        m2.metric("💸 Koszt zabiegów", zl(koszt_kp))
+        m3.metric("💰 Przychód (zrealizowany)", zl(przychod_kp))
+        m4.metric("📈 Bilans pola", zl(bilans_kp), delta="na plusie" if bilans_kp >= 0 else "na minusie",
+                  delta_color="normal" if bilans_kp >= 0 else "inverse")
+
+        st.divider()
+        st.markdown("##### 🕒 Chronologia — wszystko, co działo się na tym polu")
+        wydarzenia_kp = []
+        for _, w in zabiegi_kp.iterrows():
+            if pd.notna(w["Data planowana"]):
+                stan = "✅ wykonano" if w["Wykonano?"] else "⏳ zaplanowane"
+                wydarzenia_kp.append({
+                    "data": w["Data planowana"],
+                    "opis": f"{IKONY_TYP.get(w['Typ'], '📌')} **{w['Typ']}** — {w['Środek/Nawóz']} "
+                            f"({w['Dawka']} {w['Jednostka']}) · {zl(w['Koszt (zł)'], True)} · {stan}",
+                })
+        for _, w in zbiory_kp.iterrows():
+            if pd.notna(w["Data planowana"]):
+                stan = "✅ zrealizowano" if w["Zrealizowane?"] else "⏳ planowane"
+                plon_txt = f" · plon {w['Plon (t/ha)']:.2f} t/ha" if pd.notna(w["Plon (t/ha)"]) else ""
+                wydarzenia_kp.append({
+                    "data": w["Data planowana"],
+                    "opis": f"🌾 **Zbiór**{plon_txt} · {stan}",
+                })
+        if not wydarzenia_kp:
+            st.info("Brak zarejestrowanych zabiegów ani zbiorów dla tego pola.")
+        else:
+            for wpis in sorted(wydarzenia_kp, key=lambda w: w["data"]):
+                st.markdown(f"`{wpis['data'].strftime('%d.%m.%Y')}` — {wpis['opis']}")
+
+        st.divider()
+        col_z, col_zb = st.columns(2)
+        with col_z:
+            st.markdown("##### 🧪 Zabiegi tego pola")
+            if zabiegi_kp.empty:
+                st.info("Brak zabiegów.")
+            else:
+                st.dataframe(
+                    zabiegi_kp.drop(columns=["ID", "Pole"]).sort_values("Data planowana"),
+                    hide_index=True, use_container_width=True,
+                    height=wysokosc_tabeli(len(zabiegi_kp)),
+                    column_config=KONFIG_ZABIEGI_EDYCJA,
+                )
+        with col_zb:
+            st.markdown("##### 🌾 Zbiory tego pola")
+            if zbiory_kp.empty:
+                st.info("Brak zbiorów.")
+            else:
+                st.dataframe(
+                    zbiory_kp.drop(columns=["ID", "Pole", "Zdjęcia"]).sort_values("Data planowana"),
+                    hide_index=True, use_container_width=True,
+                    height=wysokosc_tabeli(len(zbiory_kp)),
+                    column_config=KONFIG_ZBIORY_EDYCJA,
+                )
