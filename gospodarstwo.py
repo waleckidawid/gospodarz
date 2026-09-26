@@ -576,30 +576,105 @@ KONFIG_ZBIORY_EDYCJA["Pole"] = st.column_config.SelectboxColumn(options=nazwy_po
 
 with tab1:
     st.subheader("Pola / areały")
+
+    with st.expander("➕ Dodaj nowe pole", expanded=df_pola_aktywne.empty):
+        with st.form("dodaj_pole", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            nazwa = c1.text_input("Nazwa pola*")
+            powierzchnia = c2.number_input("Powierzchnia (ha)*", min_value=0.0, step=0.1)
+            rodzaj = c3.selectbox("Rodzaj uprawy*", RODZAJE_UPRAW)
+            c4, c5, c6 = st.columns(3)
+            odmiana = c4.text_input("Odmiana")
+            rok = c5.number_input("Rok", min_value=2020, max_value=2035, value=dzis().year, step=1)
+            data_siewu = c6.date_input("Data siewu", value=None, min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+            c7, c8 = st.columns(2)
+            status = c7.selectbox("Status", STATUSY_POLA)
+            gleba = c8.selectbox("Gleba", RODZAJE_GLEBY)
+            notatka = st.text_area("Notatka", height=68)
+            dodaj = st.form_submit_button("➕ Dodaj pole", type="primary", use_container_width=True)
+        if dodaj:
+            if not nazwa.strip():
+                st.error("Podaj nazwę pola.")
+            else:
+                nowy = {"ID": 0, "Nazwa pola": nazwa.strip(), "Powierzchnia (ha)": powierzchnia,
+                        "Rodzaj uprawy": rodzaj, "Odmiana": odmiana.strip(), "Rok": int(rok),
+                        "Data siewu": data_siewu, "Status": status, "Gleba": gleba,
+                        "Notatka": notatka.strip(), "Usunięte": False}
+                zapisz_pola(pd.concat([st.session_state.pola, pd.DataFrame([nowy])], ignore_index=True))
+                st.success(f"Dodano pole „{nazwa}”.")
+                st.rerun()
+
+    if not df_pola_aktywne.empty:
+        with st.expander("✏️ Edytuj lub usuń pole"):
+            etykiety = {row["ID"]: f"{row['Nazwa pola']} — {row['Rodzaj uprawy']} ({row['Powierzchnia (ha)']:.2f} ha)"
+                        for _, row in df_pola_aktywne.iterrows()}
+            wybrane_id = st.selectbox("Wybierz pole", options=list(etykiety), format_func=lambda i: etykiety[i],
+                                       key="wybor_edycji_pola")
+            wiersz = st.session_state.pola[st.session_state.pola["ID"] == wybrane_id].iloc[0]
+            with st.form("edytuj_pole"):
+                c1, c2, c3 = st.columns(3)
+                nazwa_e = c1.text_input("Nazwa pola*", value=wiersz["Nazwa pola"])
+                powierzchnia_e = c2.number_input("Powierzchnia (ha)*", min_value=0.0, step=0.1,
+                                                  value=float(wiersz["Powierzchnia (ha)"]))
+                rodzaj_e = c3.selectbox("Rodzaj uprawy*", RODZAJE_UPRAW,
+                                         index=RODZAJE_UPRAW.index(wiersz["Rodzaj uprawy"]) if wiersz["Rodzaj uprawy"] in RODZAJE_UPRAW else 0)
+                c4, c5, c6 = st.columns(3)
+                odmiana_e = c4.text_input("Odmiana", value=wiersz["Odmiana"])
+                rok_e = c5.number_input("Rok", min_value=2020, max_value=2035,
+                                         value=int(wiersz["Rok"]) if wiersz["Rok"] else dzis().year, step=1)
+                data_siewu_e = c6.date_input("Data siewu", value=wiersz["Data siewu"],
+                                              min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                c7, c8 = st.columns(2)
+                status_e = c7.selectbox("Status", STATUSY_POLA,
+                                         index=STATUSY_POLA.index(wiersz["Status"]) if wiersz["Status"] in STATUSY_POLA else 0)
+                gleba_e = c8.selectbox("Gleba", RODZAJE_GLEBY,
+                                        index=RODZAJE_GLEBY.index(wiersz["Gleba"]) if wiersz["Gleba"] in RODZAJE_GLEBY else 0)
+                notatka_e = st.text_area("Notatka", value=wiersz["Notatka"], height=68)
+                b1, b2 = st.columns(2)
+                zapisz_btn = b1.form_submit_button("💾 Zapisz zmiany", type="primary", use_container_width=True)
+                usun_btn = b2.form_submit_button("🗑️ Usuń pole", use_container_width=True)
+            if zapisz_btn:
+                df = st.session_state.pola.copy()
+                maska = df["ID"] == wybrane_id
+                df.loc[maska, ["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
+                                "Data siewu", "Status", "Gleba", "Notatka"]] = \
+                    [nazwa_e.strip(), powierzchnia_e, rodzaj_e, odmiana_e.strip(), int(rok_e),
+                     data_siewu_e, status_e, gleba_e, notatka_e.strip()]
+                zapisz_pola(df)
+                st.success("Zapisano zmiany.")
+                st.rerun()
+            if usun_btn:
+                df = st.session_state.pola[st.session_state.pola["ID"] != wybrane_id]
+                zapisz_pola(df)
+                st.success("Usunięto pole.")
+                st.rerun()
+
+    st.divider()
+    st.subheader("Wszystkie pola")
+    st.dataframe(
+        df_pola_aktywne.drop(columns=["Usunięte"]),
+        hide_index=True, use_container_width=True,
+        height=wysokosc_tabeli(len(df_pola_aktywne)),
+        column_config=KONFIG_POLA_ODCZYT,
+    )
+
     if edycja:
-        st.caption("Dodawaj wiersze przyciskiem „+” na dole tabeli, usuwaj zaznaczając wiersz i wciskając Delete.")
-        edytowane = st.data_editor(
-            st.session_state.pola,
-            hide_index=True,
-            use_container_width=True,
-            num_rows="dynamic",
-            height=wysokosc_tabeli(len(st.session_state.pola), wiersz_dodawania=True),
-            column_config=KONFIG_POLA_EDYCJA,
-            column_order=["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
-                          "Data siewu", "Status", "Gleba", "Notatka", "Usunięte"],
-            key=f"edytor_pola_{st.session_state.wersja_edytorow}",
-        )
-        if not edytowane.equals(st.session_state.pola):
-            zapisz_pola(edytowane)
-            st.rerun()
-    else:
-        widoczne = st.session_state.pola[~st.session_state.pola["Usunięte"].fillna(False)]
-        st.dataframe(
-            widoczne.drop(columns=["Usunięte"]),
-            hide_index=True, use_container_width=True,
-            height=wysokosc_tabeli(len(widoczne)),
-            column_config=KONFIG_POLA_ODCZYT,
-        )
+        with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo)"):
+            st.caption("Dodawaj wiersze przyciskiem „+” na dole tabeli, usuwaj zaznaczając wiersz i wciskając Delete.")
+            edytowane = st.data_editor(
+                st.session_state.pola,
+                hide_index=True,
+                use_container_width=True,
+                num_rows="dynamic",
+                height=wysokosc_tabeli(len(st.session_state.pola), wiersz_dodawania=True),
+                column_config=KONFIG_POLA_EDYCJA,
+                column_order=["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
+                              "Data siewu", "Status", "Gleba", "Notatka", "Usunięte"],
+                key=f"edytor_pola_{st.session_state.wersja_edytorow}",
+            )
+            if not edytowane.equals(st.session_state.pola):
+                zapisz_pola(edytowane)
+                st.rerun()
 
     st.divider()
     st.subheader("Karty pól")
@@ -626,29 +701,105 @@ with tab2:
     if not nazwy_pol:
         st.warning("Najpierw dodaj przynajmniej jedno pole w zakładce „Pola”.")
     else:
+        with st.expander("➕ Dodaj nowy zabieg", expanded=st.session_state.zabiegi.empty):
+            with st.form("dodaj_zabieg", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                pole_z = c1.selectbox("Pole*", nazwy_pol)
+                typ_z = c2.selectbox("Typ*", TYPY_ZABIEGOW)
+                c3, c4, c5 = st.columns(3)
+                srodek_z = c3.text_input("Środek/Nawóz*")
+                dawka_z = c4.number_input("Dawka", min_value=0.0, step=0.1)
+                jednostka_z = c5.selectbox("Jednostka", JEDNOSTKI_DAWKI)
+                c6, c7, c8 = st.columns(3)
+                data_plan_z = c6.date_input("Data planowana", value=dzis(), min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                wykonano_z = c7.checkbox("Wykonano?")
+                data_wyk_z = c8.date_input("Data wykonania", value=None, min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                koszt_z = st.number_input("Koszt (zł)", min_value=0.0, step=10.0)
+                notatka_z = st.text_area("Notatka", height=68)
+                dodaj_z = st.form_submit_button("➕ Dodaj zabieg", type="primary", use_container_width=True)
+            if dodaj_z:
+                if not srodek_z.strip():
+                    st.error("Podaj nazwę środka/nawozu.")
+                else:
+                    nowy = {"ID": 0, "Pole": pole_z, "Typ": typ_z, "Środek/Nawóz": srodek_z.strip(),
+                            "Dawka": dawka_z, "Jednostka": jednostka_z, "Data planowana": data_plan_z,
+                            "Data wykonania": data_wyk_z, "Wykonano?": wykonano_z, "Koszt (zł)": koszt_z,
+                            "Notatka": notatka_z.strip()}
+                    zapisz_zabiegi(pd.concat([st.session_state.zabiegi, pd.DataFrame([nowy])], ignore_index=True))
+                    st.success("Dodano zabieg.")
+                    st.rerun()
+
+        if not st.session_state.zabiegi.empty:
+            with st.expander("✏️ Edytuj lub usuń zabieg"):
+                etykiety = {row["ID"]: f"{row['Pole']} — {row['Typ']} — {row['Środek/Nawóz']} "
+                                        f"({opis_terminu(row['Data planowana'])})"
+                            for _, row in st.session_state.zabiegi.iterrows()}
+                wybrane_id = st.selectbox("Wybierz zabieg", options=list(etykiety), format_func=lambda i: etykiety[i],
+                                           key="wybor_edycji_zabiegu")
+                wiersz = st.session_state.zabiegi[st.session_state.zabiegi["ID"] == wybrane_id].iloc[0]
+                with st.form("edytuj_zabieg"):
+                    c1, c2 = st.columns(2)
+                    pole_e = c1.selectbox("Pole*", nazwy_pol,
+                                           index=nazwy_pol.index(wiersz["Pole"]) if wiersz["Pole"] in nazwy_pol else 0)
+                    typ_e = c2.selectbox("Typ*", TYPY_ZABIEGOW,
+                                          index=TYPY_ZABIEGOW.index(wiersz["Typ"]) if wiersz["Typ"] in TYPY_ZABIEGOW else 0)
+                    c3, c4, c5 = st.columns(3)
+                    srodek_e = c3.text_input("Środek/Nawóz*", value=wiersz["Środek/Nawóz"])
+                    dawka_e = c4.number_input("Dawka", min_value=0.0, step=0.1, value=float(wiersz["Dawka"] or 0))
+                    jednostka_e = c5.selectbox("Jednostka", JEDNOSTKI_DAWKI,
+                                                index=JEDNOSTKI_DAWKI.index(wiersz["Jednostka"]) if wiersz["Jednostka"] in JEDNOSTKI_DAWKI else 0)
+                    c6, c7, c8 = st.columns(3)
+                    data_plan_e = c6.date_input("Data planowana", value=wiersz["Data planowana"],
+                                                 min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                    wykonano_e = c7.checkbox("Wykonano?", value=bool(wiersz["Wykonano?"]))
+                    data_wyk_e = c8.date_input("Data wykonania", value=wiersz["Data wykonania"],
+                                                min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                    koszt_e = st.number_input("Koszt (zł)", min_value=0.0, step=10.0, value=float(wiersz["Koszt (zł)"] or 0))
+                    notatka_e = st.text_area("Notatka", value=wiersz["Notatka"], height=68)
+                    b1, b2 = st.columns(2)
+                    zapisz_btn = b1.form_submit_button("💾 Zapisz zmiany", type="primary", use_container_width=True)
+                    usun_btn = b2.form_submit_button("🗑️ Usuń zabieg", use_container_width=True)
+                if zapisz_btn:
+                    df = st.session_state.zabiegi.copy()
+                    maska = df["ID"] == wybrane_id
+                    df.loc[maska, ["Pole", "Typ", "Środek/Nawóz", "Dawka", "Jednostka", "Data planowana",
+                                    "Data wykonania", "Wykonano?", "Koszt (zł)", "Notatka"]] = \
+                        [pole_e, typ_e, srodek_e.strip(), dawka_e, jednostka_e, data_plan_e,
+                         data_wyk_e, wykonano_e, koszt_e, notatka_e.strip()]
+                    zapisz_zabiegi(df)
+                    st.success("Zapisano zmiany.")
+                    st.rerun()
+                if usun_btn:
+                    df = st.session_state.zabiegi[st.session_state.zabiegi["ID"] != wybrane_id]
+                    zapisz_zabiegi(df)
+                    st.success("Usunięto zabieg.")
+                    st.rerun()
+
+        st.divider()
+        st.subheader("Wszystkie zabiegi")
+        st.dataframe(
+            st.session_state.zabiegi.drop(columns=["ID"]),
+            hide_index=True, use_container_width=True,
+            height=wysokosc_tabeli(len(st.session_state.zabiegi)),
+            column_config=KONFIG_ZABIEGI_EDYCJA,
+        )
+
         if edycja:
-            st.caption("Wpisz zabieg dla każdego pola: rodzaj, użyty środek/nawóz, dawkę, terminy i koszt.")
-            edytowane = st.data_editor(
-                st.session_state.zabiegi,
-                hide_index=True,
-                use_container_width=True,
-                num_rows="dynamic",
-                height=wysokosc_tabeli(len(st.session_state.zabiegi), wiersz_dodawania=True),
-                column_config=KONFIG_ZABIEGI_EDYCJA,
-                column_order=["Pole", "Typ", "Środek/Nawóz", "Dawka", "Jednostka",
-                              "Data planowana", "Data wykonania", "Wykonano?", "Koszt (zł)", "Notatka"],
-                key=f"edytor_zabiegi_{st.session_state.wersja_edytorow}",
-            )
-            if not edytowane.equals(st.session_state.zabiegi):
-                zapisz_zabiegi(edytowane)
-                st.rerun()
-        else:
-            st.dataframe(
-                st.session_state.zabiegi.drop(columns=["ID"]),
-                hide_index=True, use_container_width=True,
-                height=wysokosc_tabeli(len(st.session_state.zabiegi)),
-                column_config=KONFIG_ZABIEGI_EDYCJA,
-            )
+            with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo)"):
+                edytowane = st.data_editor(
+                    st.session_state.zabiegi,
+                    hide_index=True,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    height=wysokosc_tabeli(len(st.session_state.zabiegi), wiersz_dodawania=True),
+                    column_config=KONFIG_ZABIEGI_EDYCJA,
+                    column_order=["Pole", "Typ", "Środek/Nawóz", "Dawka", "Jednostka",
+                                  "Data planowana", "Data wykonania", "Wykonano?", "Koszt (zł)", "Notatka"],
+                    key=f"edytor_zabiegi_{st.session_state.wersja_edytorow}",
+                )
+                if not edytowane.equals(st.session_state.zabiegi):
+                    zapisz_zabiegi(edytowane)
+                    st.rerun()
 
         st.divider()
         st.subheader("Zabiegi wg pola")
@@ -678,28 +829,94 @@ with tab3:
     if not nazwy_pol:
         st.warning("Najpierw dodaj przynajmniej jedno pole w zakładce „Pola”.")
     else:
-        if edycja:
-            edytowane = st.data_editor(
-                st.session_state.zbiory,
-                hide_index=True,
-                use_container_width=True,
-                num_rows="dynamic",
-                height=wysokosc_tabeli(len(st.session_state.zbiory), wiersz_dodawania=True),
-                column_config=KONFIG_ZBIORY_EDYCJA,
-                column_order=["Pole", "Data planowana", "Data zbioru", "Plon (t/ha)",
-                              "Wilgotność (%)", "Cena (zł/t)", "Zrealizowane?", "Notatka"],
-                key=f"edytor_zbiory_{st.session_state.wersja_edytorow}",
-            )
-            if not edytowane.equals(st.session_state.zbiory):
-                zapisz_zbiory(edytowane)
+        with st.expander("➕ Dodaj nowy zbiór", expanded=st.session_state.zbiory.empty):
+            with st.form("dodaj_zbior", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                pole_zb = c1.selectbox("Pole*", nazwy_pol)
+                data_plan_zb = c2.date_input("Data planowana", value=dzis(), min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                c3, c4 = st.columns(2)
+                zrealizowane_zb = c3.checkbox("Zrealizowane?")
+                data_zbioru_zb = c4.date_input("Data zbioru", value=None, min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                c5, c6, c7 = st.columns(3)
+                plon_zb = c5.number_input("Plon (t/ha)", min_value=0.0, step=0.1)
+                wilgotnosc_zb = c6.number_input("Wilgotność (%)", min_value=0.0, max_value=100.0, step=0.5)
+                cena_zb = c7.number_input("Cena (zł/t)", min_value=0.0, step=10.0)
+                notatka_zb = st.text_area("Notatka", height=68)
+                dodaj_zb = st.form_submit_button("➕ Dodaj zbiór", type="primary", use_container_width=True)
+            if dodaj_zb:
+                nowy = {"ID": 0, "Pole": pole_zb, "Data planowana": data_plan_zb, "Data zbioru": data_zbioru_zb,
+                        "Plon (t/ha)": plon_zb, "Wilgotność (%)": wilgotnosc_zb, "Cena (zł/t)": cena_zb,
+                        "Zrealizowane?": zrealizowane_zb, "Notatka": notatka_zb.strip()}
+                zapisz_zbiory(pd.concat([st.session_state.zbiory, pd.DataFrame([nowy])], ignore_index=True))
+                st.success("Dodano zbiór.")
                 st.rerun()
-        else:
-            st.dataframe(
-                st.session_state.zbiory.drop(columns=["ID"]),
-                hide_index=True, use_container_width=True,
-                height=wysokosc_tabeli(len(st.session_state.zbiory)),
-                column_config=KONFIG_ZBIORY_EDYCJA,
-            )
+
+        if not st.session_state.zbiory.empty:
+            with st.expander("✏️ Edytuj lub usuń zbiór"):
+                etykiety = {row["ID"]: f"{row['Pole']} — zbiór {opis_terminu(row['Data planowana'])}"
+                            for _, row in st.session_state.zbiory.iterrows()}
+                wybrane_id = st.selectbox("Wybierz zbiór", options=list(etykiety), format_func=lambda i: etykiety[i],
+                                           key="wybor_edycji_zbioru")
+                wiersz = st.session_state.zbiory[st.session_state.zbiory["ID"] == wybrane_id].iloc[0]
+                with st.form("edytuj_zbior"):
+                    c1, c2 = st.columns(2)
+                    pole_e = c1.selectbox("Pole*", nazwy_pol,
+                                           index=nazwy_pol.index(wiersz["Pole"]) if wiersz["Pole"] in nazwy_pol else 0)
+                    data_plan_e = c2.date_input("Data planowana", value=wiersz["Data planowana"],
+                                                 min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                    c3, c4 = st.columns(2)
+                    zrealizowane_e = c3.checkbox("Zrealizowane?", value=bool(wiersz["Zrealizowane?"]))
+                    data_zbioru_e = c4.date_input("Data zbioru", value=wiersz["Data zbioru"],
+                                                   min_value=KALENDARZ_OD, max_value=KALENDARZ_DO)
+                    c5, c6, c7 = st.columns(3)
+                    plon_e = c5.number_input("Plon (t/ha)", min_value=0.0, step=0.1, value=float(wiersz["Plon (t/ha)"] or 0))
+                    wilgotnosc_e = c6.number_input("Wilgotność (%)", min_value=0.0, max_value=100.0, step=0.5,
+                                                    value=float(wiersz["Wilgotność (%)"] or 0))
+                    cena_e = c7.number_input("Cena (zł/t)", min_value=0.0, step=10.0, value=float(wiersz["Cena (zł/t)"] or 0))
+                    notatka_e = st.text_area("Notatka", value=wiersz["Notatka"], height=68)
+                    b1, b2 = st.columns(2)
+                    zapisz_btn = b1.form_submit_button("💾 Zapisz zmiany", type="primary", use_container_width=True)
+                    usun_btn = b2.form_submit_button("🗑️ Usuń zbiór", use_container_width=True)
+                if zapisz_btn:
+                    df = st.session_state.zbiory.copy()
+                    maska = df["ID"] == wybrane_id
+                    df.loc[maska, ["Pole", "Data planowana", "Data zbioru", "Plon (t/ha)", "Wilgotność (%)",
+                                    "Cena (zł/t)", "Zrealizowane?", "Notatka"]] = \
+                        [pole_e, data_plan_e, data_zbioru_e, plon_e, wilgotnosc_e, cena_e, zrealizowane_e, notatka_e.strip()]
+                    zapisz_zbiory(df)
+                    st.success("Zapisano zmiany.")
+                    st.rerun()
+                if usun_btn:
+                    df = st.session_state.zbiory[st.session_state.zbiory["ID"] != wybrane_id]
+                    zapisz_zbiory(df)
+                    st.success("Usunięto zbiór.")
+                    st.rerun()
+
+        st.divider()
+        st.subheader("Wszystkie zbiory")
+        st.dataframe(
+            st.session_state.zbiory.drop(columns=["ID"]),
+            hide_index=True, use_container_width=True,
+            height=wysokosc_tabeli(len(st.session_state.zbiory)),
+            column_config=KONFIG_ZBIORY_EDYCJA,
+        )
+
+        if edycja:
+            with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo)"):
+                edytowane = st.data_editor(
+                    st.session_state.zbiory,
+                    hide_index=True,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    height=wysokosc_tabeli(len(st.session_state.zbiory), wiersz_dodawania=True),
+                    column_config=KONFIG_ZBIORY_EDYCJA,
+                    column_order=["Pole", "Data planowana", "Data zbioru", "Plon (t/ha)",
+                                  "Wilgotność (%)", "Cena (zł/t)", "Zrealizowane?", "Notatka"],
+                    key=f"edytor_zbiory_{st.session_state.wersja_edytorow}",
+                )
+                if not edytowane.equals(st.session_state.zbiory):
+                    zapisz_zbiory(edytowane)
+                    st.rerun()
 
         st.divider()
         st.subheader("Plon i przychód")
