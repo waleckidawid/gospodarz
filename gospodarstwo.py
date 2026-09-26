@@ -8,11 +8,16 @@ import re
 import time
 from datetime import date, datetime, timedelta
 
+import io as _io
+
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+from google.oauth2.service_account import Credentials as GCredentials
+from googleapiclient.discovery import build as google_build
+from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 st.set_page_config(
     page_title="Moje gospodarstwo",
@@ -167,7 +172,7 @@ WORKSHEET_ZBIORY = "Zbiory"
 # Definicja kolumn per arkusz: (wszystkie kolumny, bool, liczbowe, daty, id)
 SCHEMAT_POLA = {
     "kolumny": ["ID", "Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana",
-                "Rok", "Data siewu", "Status", "Gleba", "Notatka", "Usunięte"],
+                "Rok", "Data siewu", "Status", "Gleba", "Notatka", "Zdjęcia", "Usunięte"],
     "bool": ["Usunięte"], "liczby": ["Powierzchnia (ha)", "Rok"],
     "daty": ["Data siewu"],
 }
@@ -188,6 +193,71 @@ SCHEMAT_ZBIORY = {
 @st.cache_resource
 def pobierz_polaczenie():
     return st.connection("gsheets", type=GSheetsConnection)
+
+
+# ======================================================================
+# ZDJĘCIA POLA — przechowywane w Google Drive (arkusz trzyma tylko ID plików)
+# Wymaga: włączonego Google Drive API w tym samym projekcie Google Cloud,
+# folderu na Dysku udostępnionego kontu serwisowemu (rola: Edytor) oraz
+# jego ID w secrets.toml pod [drive] folder_id.
+# ======================================================================
+
+@st.cache_resource
+def pobierz_usluge_drive():
+    dane_konta = {k: v for k, v in dict(st.secrets["connections"]["gsheets"]).items()
+                  if k != "spreadsheet"}
+    poswiadczenia = GCredentials.from_service_account_info(
+        dane_konta, scopes=["https://www.googleapis.com/auth/drive"])
+    return google_build("drive", "v3", credentials=poswiadczenia, cache_discovery=False)
+
+
+def folder_zdjec_id() -> str:
+    return st.secrets.get("drive", {}).get("folder_id", "")
+
+
+def wgraj_zdjecie(plik) -> str | None:
+    """Wgrywa plik ze st.file_uploader do folderu Google Drive. Zwraca ID pliku albo None przy błędzie."""
+    folder_id = folder_zdjec_id()
+    if not folder_id:
+        st.error("Brak skonfigurowanego folderu Google Drive na zdjęcia (sekcja [drive] w secrets).")
+        return None
+    try:
+        usluga = pobierz_usluge_drive()
+        media = MediaIoBaseUpload(_io.BytesIO(plik.getvalue()), mimetype=plik.type or "image/jpeg")
+        metadane = {"name": plik.name, "parents": [folder_id]}
+        wynik = usluga.files().create(body=metadane, media_body=media, fields="id").execute()
+        return wynik.get("id")
+    except Exception as e:
+        st.error(f"Nie udało się wgrać zdjęcia „{plik.name}”: {e}")
+        return None
+
+
+def usun_zdjecie(file_id: str):
+    try:
+        pobierz_usluge_drive().files().delete(fileId=file_id).execute()
+    except Exception:
+        pass  # plik mógł już zniknąć - nie blokujemy dalszego działania appki
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def pobierz_bajty_zdjecia(file_id: str):
+    try:
+        usluga = pobierz_usluge_drive()
+        zadanie = usluga.files().get_media(fileId=file_id)
+        bufor = _io.BytesIO()
+        pobieranie = MediaIoBaseDownload(bufor, zadanie)
+        gotowe = False
+        while not gotowe:
+            _, gotowe = pobieranie.next_chunk()
+        return bufor.getvalue()
+    except Exception:
+        return None
+
+
+def lista_zdjec(wartosc) -> list:
+    if not wartosc or (isinstance(wartosc, float) and math.isnan(wartosc)):
+        return []
+    return [i.strip() for i in str(wartosc).split(",") if i.strip()]
 
 
 # ---- odporne parsowanie wartości z Google Sheets ----
@@ -380,19 +450,19 @@ def przykladowe_pola() -> pd.DataFrame:
         {"ID": 1, "Nazwa pola": "Za stodołą", "Powierzchnia (ha)": 4.20,
          "Rodzaj uprawy": "Pszenica ozima", "Odmiana": "Arkadia", "Rok": 2026,
          "Data siewu": date(2025, 9, 25), "Status": "W uprawie", "Gleba": "Średnia",
-         "Notatka": "", "Usunięte": False},
+         "Notatka": "", "Zdjęcia": "", "Usunięte": False},
         {"ID": 2, "Nazwa pola": "Nad rzeką", "Powierzchnia (ha)": 6.80,
          "Rodzaj uprawy": "Rzepak ozimy", "Odmiana": "DK Exception", "Rok": 2026,
          "Data siewu": date(2025, 8, 20), "Status": "Gotowe do zbioru", "Gleba": "Ciężka",
-         "Notatka": "Uważać na wysoką wilgotność po deszczach", "Usunięte": False},
+         "Notatka": "Uważać na wysoką wilgotność po deszczach", "Zdjęcia": "", "Usunięte": False},
         {"ID": 3, "Nazwa pola": "Kowalskie", "Powierzchnia (ha)": 3.10,
          "Rodzaj uprawy": "Kukurydza na ziarno", "Odmiana": "P8834", "Rok": 2026,
          "Data siewu": date(2026, 4, 25), "Status": "Zasiane", "Gleba": "Lekka",
-         "Notatka": "", "Usunięte": False},
+         "Notatka": "", "Zdjęcia": "", "Usunięte": False},
         {"ID": 4, "Nazwa pola": "Przy lesie", "Powierzchnia (ha)": 2.50,
          "Rodzaj uprawy": "Ugór", "Odmiana": "", "Rok": 2026,
          "Data siewu": None, "Status": "Ugorowane", "Gleba": "Bardzo lekka",
-         "Notatka": "Planowany siew jęczmienia jarego na wiosnę 2027", "Usunięte": False},
+         "Notatka": "Planowany siew jęczmienia jarego na wiosnę 2027", "Zdjęcia": "", "Usunięte": False},
     ]
     return pd.DataFrame(dane)
 
@@ -491,6 +561,8 @@ KONFIG_POLA_EDYCJA = {
     "Status": st.column_config.SelectboxColumn(options=STATUSY_POLA, required=True),
     "Gleba": st.column_config.SelectboxColumn(options=RODZAJE_GLEBY),
     "Notatka": st.column_config.TextColumn(),
+    "Zdjęcia": st.column_config.TextColumn(
+        disabled=True, help="Zarządzaj zdjęciami przez formularz „Dodaj/Edytuj pole” powyżej."),
     "Usunięte": st.column_config.CheckboxColumn(default=False),
 }
 KONFIG_POLA_ODCZYT = {k: v for k, v in KONFIG_POLA_EDYCJA.items() if k not in ("Usunięte",)}
@@ -591,15 +663,24 @@ with tab1:
             status = c7.selectbox("Status", STATUSY_POLA)
             gleba = c8.selectbox("Gleba", RODZAJE_GLEBY)
             notatka = st.text_area("Notatka", height=68)
+            zdjecia_nowe = st.file_uploader("Zdjęcia pola (opcjonalnie)", type=["png", "jpg", "jpeg"],
+                                             accept_multiple_files=True, key="upload_dodaj_pole")
             dodaj = st.form_submit_button("➕ Dodaj pole", type="primary", use_container_width=True)
         if dodaj:
             if not nazwa.strip():
                 st.error("Podaj nazwę pola.")
             else:
+                ids_zdjec = []
+                if zdjecia_nowe:
+                    with st.spinner("Wgrywanie zdjęć..."):
+                        for plik in zdjecia_nowe:
+                            fid = wgraj_zdjecie(plik)
+                            if fid:
+                                ids_zdjec.append(fid)
                 nowy = {"ID": 0, "Nazwa pola": nazwa.strip(), "Powierzchnia (ha)": powierzchnia,
                         "Rodzaj uprawy": rodzaj, "Odmiana": odmiana.strip(), "Rok": int(rok),
                         "Data siewu": data_siewu, "Status": status, "Gleba": gleba,
-                        "Notatka": notatka.strip(), "Usunięte": False}
+                        "Notatka": notatka.strip(), "Zdjęcia": ",".join(ids_zdjec), "Usunięte": False}
                 zapisz_pola(pd.concat([st.session_state.pola, pd.DataFrame([nowy])], ignore_index=True))
                 st.success(f"Dodano pole „{nazwa}”.")
                 st.rerun()
@@ -611,6 +692,7 @@ with tab1:
             wybrane_id = st.selectbox("Wybierz pole", options=list(etykiety), format_func=lambda i: etykiety[i],
                                        key="wybor_edycji_pola")
             wiersz = st.session_state.pola[st.session_state.pola["ID"] == wybrane_id].iloc[0]
+            obecne_zdjecia = lista_zdjec(wiersz["Zdjęcia"])
             with st.form("edytuj_pole"):
                 c1, c2, c3 = st.columns(3)
                 nazwa_e = c1.text_input("Nazwa pola*", value=wiersz["Nazwa pola"])
@@ -630,20 +712,51 @@ with tab1:
                 gleba_e = c8.selectbox("Gleba", RODZAJE_GLEBY,
                                         index=RODZAJE_GLEBY.index(wiersz["Gleba"]) if wiersz["Gleba"] in RODZAJE_GLEBY else 0)
                 notatka_e = st.text_area("Notatka", value=wiersz["Notatka"], height=68)
+
+                flagi_usun_zdj = []
+                if obecne_zdjecia:
+                    st.caption("Obecne zdjęcia — zaznacz „Usuń”, żeby skasować przy zapisie:")
+                    kol_zdj = st.columns(min(len(obecne_zdjecia), 4))
+                    for idx, fid in enumerate(obecne_zdjecia):
+                        with kol_zdj[idx % len(kol_zdj)]:
+                            bajty = pobierz_bajty_zdjecia(fid)
+                            if bajty:
+                                st.image(bajty, use_container_width=True)
+                            else:
+                                st.caption("⚠️ Nie udało się wczytać zdjęcia")
+                            flagi_usun_zdj.append(st.checkbox("Usuń", key=f"usun_zdj_{wybrane_id}_{fid}"))
+                zdjecia_nowe_e = st.file_uploader("Dodaj nowe zdjęcia", type=["png", "jpg", "jpeg"],
+                                                   accept_multiple_files=True, key=f"upload_edytuj_{wybrane_id}")
+
                 b1, b2 = st.columns(2)
                 zapisz_btn = b1.form_submit_button("💾 Zapisz zmiany", type="primary", use_container_width=True)
                 usun_btn = b2.form_submit_button("🗑️ Usuń pole", use_container_width=True)
             if zapisz_btn:
+                zostawione = [fid for fid, usun in zip(obecne_zdjecia, flagi_usun_zdj) if not usun]
+                usuniete = [fid for fid, usun in zip(obecne_zdjecia, flagi_usun_zdj) if usun]
+                nowe_id_zdjec = []
+                if zdjecia_nowe_e:
+                    with st.spinner("Wgrywanie zdjęć..."):
+                        for plik in zdjecia_nowe_e:
+                            fid = wgraj_zdjecie(plik)
+                            if fid:
+                                nowe_id_zdjec.append(fid)
+                for fid in usuniete:
+                    usun_zdjecie(fid)
+                wszystkie_zdjecia = zostawione + nowe_id_zdjec
+
                 df = st.session_state.pola.copy()
                 maska = df["ID"] == wybrane_id
                 df.loc[maska, ["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
-                                "Data siewu", "Status", "Gleba", "Notatka"]] = \
+                                "Data siewu", "Status", "Gleba", "Notatka", "Zdjęcia"]] = \
                     [nazwa_e.strip(), powierzchnia_e, rodzaj_e, odmiana_e.strip(), int(rok_e),
-                     data_siewu_e, status_e, gleba_e, notatka_e.strip()]
+                     data_siewu_e, status_e, gleba_e, notatka_e.strip(), ",".join(wszystkie_zdjecia)]
                 zapisz_pola(df)
                 st.success("Zapisano zmiany.")
                 st.rerun()
             if usun_btn:
+                for fid in obecne_zdjecia:
+                    usun_zdjecie(fid)
                 df = st.session_state.pola[st.session_state.pola["ID"] != wybrane_id]
                 zapisz_pola(df)
                 st.success("Usunięto pole.")
@@ -652,7 +765,7 @@ with tab1:
     st.divider()
     st.subheader("Wszystkie pola")
     st.dataframe(
-        df_pola_aktywne.drop(columns=["Usunięte"]),
+        df_pola_aktywne.drop(columns=["Usunięte", "Zdjęcia"]),
         hide_index=True, use_container_width=True,
         height=wysokosc_tabeli(len(df_pola_aktywne)),
         column_config=KONFIG_POLA_ODCZYT,
@@ -683,6 +796,11 @@ with tab1:
         with kolumny[i % 3]:
             ikona = IKONY_STATUS.get(wiersz["Status"], "🌾")
             with st.container(border=True):
+                zdjecia_karty = lista_zdjec(wiersz["Zdjęcia"])
+                if zdjecia_karty:
+                    bajty = pobierz_bajty_zdjecia(zdjecia_karty[0])
+                    if bajty:
+                        st.image(bajty, use_container_width=True)
                 st.markdown(f"**{ikona} {wiersz['Nazwa pola']}**")
                 st.caption(f"{wiersz['Rodzaj uprawy']}" + (f" · {wiersz['Odmiana']}" if wiersz["Odmiana"] else ""))
                 st.write(f"📐 {wiersz['Powierzchnia (ha)']:.2f} ha  ·  {wiersz['Status']}")
@@ -690,6 +808,8 @@ with tab1:
                     st.caption(f"🌱 Siew: {wiersz['Data siewu'].strftime('%d.%m.%Y')}")
                 if wiersz["Notatka"]:
                     st.caption(f"📝 {wiersz['Notatka']}")
+                if len(zdjecia_karty) > 1:
+                    st.caption(f"📷 +{len(zdjecia_karty) - 1} więcej zdjęć")
 
 
 # ======================================================================
