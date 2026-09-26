@@ -2,8 +2,10 @@
 Gospodarstwo – zarządzanie polami, zabiegami, zbiorami i planem prac
 Dane trzymane trwale w Google Sheets (patrz README_KONFIGURACJA.md).
 """
+import hmac
 import math
 import re
+import time
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -18,6 +20,58 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ======================================================================
+# LOGOWANIE HASŁEM
+# Hasło trzymane w st.secrets (plik .streamlit/secrets.toml, NIGDY w repo GitHub).
+# ======================================================================
+
+LIMIT_NIEUDANYCH_PROB = 5
+CZAS_BLOKADY_PO_PROBACH_SEKUND = 30
+
+
+def haslo_poprawne(wpisane: str) -> bool:
+    if not wpisane:
+        return False
+    oczekiwane = st.secrets.get("haslo", {}).get("haslo", "")
+    if not oczekiwane:
+        return False
+    return hmac.compare_digest(wpisane, oczekiwane)
+
+
+def ekran_logowania():
+    st.title("🌾 Moje gospodarstwo")
+    if "proby_logowania" not in st.session_state:
+        st.session_state.proby_logowania = 0
+        st.session_state.zablokowano_do = 0.0
+
+    if time.time() < st.session_state.zablokowano_do:
+        pozostalo = int(st.session_state.zablokowano_do - time.time())
+        st.error(f"⏳ Zbyt wiele prób. Spróbuj ponownie za {pozostalo} s.")
+        st.stop()
+
+    with st.form("logowanie"):
+        haslo = st.text_input("Hasło", type="password")
+        zaloguj = st.form_submit_button("Zaloguj", type="primary", use_container_width=True)
+
+    if zaloguj:
+        if haslo_poprawne(haslo):
+            st.session_state.zalogowany = True
+            st.session_state.proby_logowania = 0
+            st.rerun()
+        else:
+            st.session_state.proby_logowania += 1
+            if st.session_state.proby_logowania >= LIMIT_NIEUDANYCH_PROB:
+                st.session_state.zablokowano_do = time.time() + CZAS_BLOKADY_PO_PROBACH_SEKUND
+                st.session_state.proby_logowania = 0
+                st.error("⏳ Zbyt wiele nieudanych prób.")
+            else:
+                st.error("❌ Nieprawidłowe hasło.")
+    st.stop()
+
+
+if not st.session_state.get("zalogowany"):
+    ekran_logowania()
 
 # ======================================================================
 # SŁOWNIKI / STAŁE
@@ -474,7 +528,11 @@ KONFIG_ZBIORY_EDYCJA = {
 
 with st.sidebar:
     st.title("🌾 Moje gospodarstwo")
-    st.session_state.edycja = st.toggle("✏️ Tryb edycji", value=st.session_state.edycja)
+    c_edycja, c_wyloguj = st.columns([2, 1])
+    st.session_state.edycja = c_edycja.toggle("✏️ Tryb edycji", value=st.session_state.edycja)
+    if c_wyloguj.button("🚪 Wyloguj"):
+        st.session_state.zalogowany = False
+        st.rerun()
     st.divider()
 
     df_pola_aktywne = st.session_state.pola[~st.session_state.pola["Usunięte"].fillna(False)]
