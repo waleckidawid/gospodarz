@@ -1048,7 +1048,13 @@ with tab5:
     st.subheader("Podsumowanie finansowe i przegląd upraw")
 
     koszt_zabiegow = st.session_state.zabiegi["Koszt (zł)"].fillna(0).sum()
-    przychod_zbiorow = tabela_plonow["Przychód (zł)"].fillna(0).sum() if 'tabela_plonow' in dir() and not tabela_plonow.empty else 0
+    _tabela_plonow = globals().get("tabela_plonow")
+    if _tabela_plonow is not None and not _tabela_plonow.empty:
+        przychod_zbiorow = _tabela_plonow.loc[
+            _tabela_plonow["Zrealizowane?"] == True, "Przychód całkowity (zł)"
+        ].fillna(0).sum()
+    else:
+        przychod_zbiorow = 0
     bilans = przychod_zbiorow - koszt_zabiegow
 
     m1, m2, m3, m4 = st.columns(4)
