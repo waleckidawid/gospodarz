@@ -171,7 +171,7 @@ WORKSHEET_ZBIORY = "Zbiory"
 
 # Definicja kolumn per arkusz: (wszystkie kolumny, bool, liczbowe, daty, id)
 SCHEMAT_POLA = {
-    "kolumny": ["ID", "Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana",
+    "kolumny": ["ID", "Nazwa pola", "Miejscowość", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana",
                 "Rok", "Data siewu", "Status", "Gleba", "Notatka", "Zdjęcia", "Usunięte"],
     "bool": ["Usunięte"], "liczby": ["Powierzchnia (ha)", "Rok"],
     "daty": ["Data siewu"],
@@ -447,19 +447,19 @@ def zapisz_arkusz(nazwa: str, df: pd.DataFrame, schemat: dict):
 
 def przykladowe_pola() -> pd.DataFrame:
     dane = [
-        {"ID": 1, "Nazwa pola": "Za stodołą", "Powierzchnia (ha)": 4.20,
+        {"ID": 1, "Nazwa pola": "Za stodołą", "Miejscowość": "Kowalewo", "Powierzchnia (ha)": 4.20,
          "Rodzaj uprawy": "Pszenica ozima", "Odmiana": "Arkadia", "Rok": 2026,
          "Data siewu": date(2025, 9, 25), "Status": "W uprawie", "Gleba": "Średnia",
          "Notatka": "", "Zdjęcia": "", "Usunięte": False},
-        {"ID": 2, "Nazwa pola": "Nad rzeką", "Powierzchnia (ha)": 6.80,
+        {"ID": 2, "Nazwa pola": "Nad rzeką", "Miejscowość": "Kowalewo", "Powierzchnia (ha)": 6.80,
          "Rodzaj uprawy": "Rzepak ozimy", "Odmiana": "DK Exception", "Rok": 2026,
          "Data siewu": date(2025, 8, 20), "Status": "Gotowe do zbioru", "Gleba": "Ciężka",
          "Notatka": "Uważać na wysoką wilgotność po deszczach", "Zdjęcia": "", "Usunięte": False},
-        {"ID": 3, "Nazwa pola": "Kowalskie", "Powierzchnia (ha)": 3.10,
+        {"ID": 3, "Nazwa pola": "Kowalskie", "Miejscowość": "Lipno", "Powierzchnia (ha)": 3.10,
          "Rodzaj uprawy": "Kukurydza na ziarno", "Odmiana": "P8834", "Rok": 2026,
          "Data siewu": date(2026, 4, 25), "Status": "Zasiane", "Gleba": "Lekka",
          "Notatka": "", "Zdjęcia": "", "Usunięte": False},
-        {"ID": 4, "Nazwa pola": "Przy lesie", "Powierzchnia (ha)": 2.50,
+        {"ID": 4, "Nazwa pola": "Przy lesie", "Miejscowość": "Lipno", "Powierzchnia (ha)": 2.50,
          "Rodzaj uprawy": "Ugór", "Odmiana": "", "Rok": 2026,
          "Data siewu": None, "Status": "Ugorowane", "Gleba": "Bardzo lekka",
          "Notatka": "Planowany siew jęczmienia jarego na wiosnę 2027", "Zdjęcia": "", "Usunięte": False},
@@ -553,6 +553,7 @@ def zapisz_zbiory(nowy: pd.DataFrame):
 KONFIG_POLA_EDYCJA = {
     "ID": st.column_config.NumberColumn(disabled=True),
     "Nazwa pola": st.column_config.TextColumn(required=True),
+    "Miejscowość": st.column_config.TextColumn(required=True),
     "Powierzchnia (ha)": st.column_config.NumberColumn(min_value=0.0, step=0.1, format="%.2f", required=True),
     "Rodzaj uprawy": st.column_config.SelectboxColumn(options=RODZAJE_UPRAW, required=True),
     "Odmiana": st.column_config.TextColumn(),
@@ -609,7 +610,19 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
-    df_pola_aktywne = st.session_state.pola[~st.session_state.pola["Usunięte"].fillna(False)]
+    df_pola_wszystkie = st.session_state.pola[~st.session_state.pola["Usunięte"].fillna(False)]
+
+    miejscowosci_dostepne = sorted(
+        m for m in df_pola_wszystkie["Miejscowość"].dropna().unique().tolist() if str(m).strip()
+    )
+    opcje_miejscowosci = ["🌍 Wszystkie miejscowości"] + miejscowosci_dostepne
+    wybrana_miejscowosc = st.selectbox("🏘️ Filtruj wg miejscowości", opcje_miejscowosci, key="filtr_miejscowosc")
+    if wybrana_miejscowosc == "🌍 Wszystkie miejscowości":
+        df_pola_aktywne = df_pola_wszystkie
+    else:
+        df_pola_aktywne = df_pola_wszystkie[df_pola_wszystkie["Miejscowość"] == wybrana_miejscowosc]
+
+    st.divider()
     st.metric("Łączny areał", f"{df_pola_aktywne['Powierzchnia (ha)'].sum():.2f} ha")
     st.metric("Liczba pól", len(df_pola_aktywne))
 
@@ -619,6 +632,13 @@ with st.sidebar:
         wg_uprawy = df_pola_aktywne.groupby("Rodzaj uprawy")["Powierzchnia (ha)"].sum().sort_values(ascending=False)
         for uprawa, ha in wg_uprawy.items():
             st.caption(f"• {uprawa}: {ha:.2f} ha")
+
+    if wybrana_miejscowosc == "🌍 Wszystkie miejscowości" and not df_pola_wszystkie.empty:
+        st.divider()
+        st.caption("Areał wg miejscowości")
+        wg_miejsc = df_pola_wszystkie.groupby("Miejscowość")["Powierzchnia (ha)"].sum().sort_values(ascending=False)
+        for miejsce, ha in wg_miejsc.items():
+            st.caption(f"• {miejsce}: {ha:.2f} ha")
 
     st.divider()
     if st.button("🔄 Odśwież z arkusza", use_container_width=True):
@@ -641,8 +661,14 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
 
 edycja = st.session_state.edycja
 nazwy_pol = sorted(df_pola_aktywne["Nazwa pola"].tolist())
+wszystkie_nazwy_pol = sorted(df_pola_wszystkie["Nazwa pola"].tolist())
 KONFIG_ZABIEGI_EDYCJA["Pole"] = st.column_config.SelectboxColumn(options=nazwy_pol, required=True)
 KONFIG_ZBIORY_EDYCJA["Pole"] = st.column_config.SelectboxColumn(options=nazwy_pol, required=True)
+
+# Zabiegi/zbiory ograniczone do pól z aktualnie wybranej miejscowości (filtr w panelu bocznym) -
+# używane wszędzie tam, gdzie pokazujemy podsumowania/listy, a nie formularze dodawania/edycji.
+zabiegi_widoczne = st.session_state.zabiegi[st.session_state.zabiegi["Pole"].isin(nazwy_pol)]
+zbiory_widoczne = st.session_state.zbiory[st.session_state.zbiory["Pole"].isin(nazwy_pol)]
 
 
 # ======================================================================
@@ -656,6 +682,7 @@ with tab1:
         with st.form("dodaj_pole", clear_on_submit=True):
             c1, c2, c3 = st.columns(3)
             nazwa = c1.text_input("Nazwa pola*")
+            miejscowosc = c1.text_input("Miejscowość*")
             powierzchnia = c2.number_input("Powierzchnia (ha)*", min_value=0.0, step=0.1)
             rodzaj = c3.selectbox("Rodzaj uprawy*", RODZAJE_UPRAW)
             rodzaj_wlasny = st.text_input(
@@ -675,6 +702,8 @@ with tab1:
         if dodaj:
             if not nazwa.strip():
                 st.error("Podaj nazwę pola.")
+            elif not miejscowosc.strip():
+                st.error("Podaj miejscowość.")
             else:
                 ids_zdjec = []
                 if zdjecia_nowe:
@@ -684,7 +713,8 @@ with tab1:
                             if fid:
                                 ids_zdjec.append(fid)
                 rodzaj_ostateczny = rodzaj_wlasny.strip() if rodzaj_wlasny.strip() else rodzaj
-                nowy = {"ID": 0, "Nazwa pola": nazwa.strip(), "Powierzchnia (ha)": powierzchnia,
+                nowy = {"ID": 0, "Nazwa pola": nazwa.strip(), "Miejscowość": miejscowosc.strip(),
+                        "Powierzchnia (ha)": powierzchnia,
                         "Rodzaj uprawy": rodzaj_ostateczny, "Odmiana": odmiana.strip(), "Rok": int(rok),
                         "Data siewu": data_siewu, "Status": status, "Gleba": gleba,
                         "Notatka": notatka.strip(), "Zdjęcia": ",".join(ids_zdjec), "Usunięte": False}
@@ -694,7 +724,7 @@ with tab1:
 
     if not df_pola_aktywne.empty:
         with st.expander("✏️ Edytuj lub usuń pole"):
-            etykiety = {row["ID"]: f"{row['Nazwa pola']} — {row['Rodzaj uprawy']} ({row['Powierzchnia (ha)']:.2f} ha)"
+            etykiety = {row["ID"]: f"{row['Nazwa pola']} ({row['Miejscowość']}) — {row['Rodzaj uprawy']} ({row['Powierzchnia (ha)']:.2f} ha)"
                         for _, row in df_pola_aktywne.iterrows()}
             wybrane_id = st.selectbox("Wybierz pole", options=list(etykiety), format_func=lambda i: etykiety[i],
                                        key="wybor_edycji_pola")
@@ -703,6 +733,7 @@ with tab1:
             with st.form("edytuj_pole"):
                 c1, c2, c3 = st.columns(3)
                 nazwa_e = c1.text_input("Nazwa pola*", value=wiersz["Nazwa pola"])
+                miejscowosc_e = c1.text_input("Miejscowość*", value=wiersz["Miejscowość"])
                 powierzchnia_e = c2.number_input("Powierzchnia (ha)*", min_value=0.0, step=0.1,
                                                   value=float(wiersz["Powierzchnia (ha)"]))
                 rodzaj_e = c3.selectbox("Rodzaj uprawy*", RODZAJE_UPRAW,
@@ -759,9 +790,9 @@ with tab1:
                 rodzaj_e_ostateczny = rodzaj_wlasny_e.strip() if rodzaj_wlasny_e.strip() else rodzaj_e
                 df = st.session_state.pola.copy()
                 maska = df["ID"] == wybrane_id
-                df.loc[maska, ["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
+                df.loc[maska, ["Nazwa pola", "Miejscowość", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
                                 "Data siewu", "Status", "Gleba", "Notatka", "Zdjęcia"]] = \
-                    [nazwa_e.strip(), powierzchnia_e, rodzaj_e_ostateczny, odmiana_e.strip(), int(rok_e),
+                    [nazwa_e.strip(), miejscowosc_e.strip(), powierzchnia_e, rodzaj_e_ostateczny, odmiana_e.strip(), int(rok_e),
                      data_siewu_e, status_e, gleba_e, notatka_e.strip(), ",".join(wszystkie_zdjecia)]
                 zapisz_pola(df)
                 st.success("Zapisano zmiany.")
@@ -793,7 +824,7 @@ with tab1:
                 num_rows="dynamic",
                 height=wysokosc_tabeli(len(st.session_state.pola), wiersz_dodawania=True),
                 column_config=KONFIG_POLA_EDYCJA,
-                column_order=["Nazwa pola", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
+                column_order=["Nazwa pola", "Miejscowość", "Powierzchnia (ha)", "Rodzaj uprawy", "Odmiana", "Rok",
                               "Data siewu", "Status", "Gleba", "Notatka", "Usunięte"],
                 key=f"edytor_pola_{st.session_state.wersja_edytorow}",
             )
@@ -814,6 +845,7 @@ with tab1:
                     if bajty:
                         st.image(bajty, use_container_width=True)
                 st.markdown(f"**{ikona} {wiersz['Nazwa pola']}**")
+                st.caption(f"📍 {wiersz['Miejscowość']}")
                 st.caption(f"{wiersz['Rodzaj uprawy']}" + (f" · {wiersz['Odmiana']}" if wiersz["Odmiana"] else ""))
                 st.write(f"📐 {wiersz['Powierzchnia (ha)']:.2f} ha  ·  {wiersz['Status']}")
                 if isinstance(wiersz["Data siewu"], date):
@@ -865,11 +897,11 @@ with tab2:
                     st.success("Dodano zabieg.")
                     st.rerun()
 
-        if not st.session_state.zabiegi.empty:
+        if not zabiegi_widoczne.empty:
             with st.expander("✏️ Edytuj lub usuń zabieg"):
                 etykiety = {row["ID"]: f"{row['Pole']} — {row['Typ']} — {row['Środek/Nawóz']} "
                                         f"({opis_terminu(row['Data planowana'])})"
-                            for _, row in st.session_state.zabiegi.iterrows()}
+                            for _, row in zabiegi_widoczne.iterrows()}
                 wybrane_id = st.selectbox("Wybierz zabieg", options=list(etykiety), format_func=lambda i: etykiety[i],
                                            key="wybor_edycji_zabiegu")
                 wiersz = st.session_state.zabiegi[st.session_state.zabiegi["ID"] == wybrane_id].iloc[0]
@@ -917,23 +949,25 @@ with tab2:
                     st.rerun()
 
         st.divider()
-        st.subheader("Wszystkie zabiegi")
+        st.subheader("Wszystkie zabiegi" + ("" if wybrana_miejscowosc == "🌍 Wszystkie miejscowości" else f" — {wybrana_miejscowosc}"))
         st.dataframe(
-            st.session_state.zabiegi.drop(columns=["ID"]),
+            zabiegi_widoczne.drop(columns=["ID"]),
             hide_index=True, use_container_width=True,
-            height=wysokosc_tabeli(len(st.session_state.zabiegi)),
+            height=wysokosc_tabeli(len(zabiegi_widoczne)),
             column_config=KONFIG_ZABIEGI_EDYCJA,
         )
 
         if edycja:
-            with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo)"):
+            with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo — zawsze pokazuje WSZYSTKIE pola, niezależnie od filtra miejscowości)"):
+                konfig_zabiegi_pelne = {**KONFIG_ZABIEGI_EDYCJA,
+                                         "Pole": st.column_config.SelectboxColumn(options=wszystkie_nazwy_pol, required=True)}
                 edytowane = st.data_editor(
                     st.session_state.zabiegi,
                     hide_index=True,
                     use_container_width=True,
                     num_rows="dynamic",
                     height=wysokosc_tabeli(len(st.session_state.zabiegi), wiersz_dodawania=True),
-                    column_config=KONFIG_ZABIEGI_EDYCJA,
+                    column_config=konfig_zabiegi_pelne,
                     column_order=["Pole", "Typ", "Środek/Nawóz", "Dawka", "Jednostka",
                                   "Data planowana", "Data wykonania", "Wykonano?", "Koszt (zł)", "Notatka"],
                     key=f"edytor_zabiegi_{st.session_state.wersja_edytorow}",
@@ -1002,10 +1036,10 @@ with tab3:
                 st.success("Dodano zbiór.")
                 st.rerun()
 
-        if not st.session_state.zbiory.empty:
+        if not zbiory_widoczne.empty:
             with st.expander("✏️ Edytuj lub usuń zbiór"):
                 etykiety = {row["ID"]: f"{row['Pole']} — zbiór {opis_terminu(row['Data planowana'])}"
-                            for _, row in st.session_state.zbiory.iterrows()}
+                            for _, row in zbiory_widoczne.iterrows()}
                 wybrane_id = st.selectbox("Wybierz zbiór", options=list(etykiety), format_func=lambda i: etykiety[i],
                                            key="wybor_edycji_zbioru")
                 wiersz = st.session_state.zbiory[st.session_state.zbiory["ID"] == wybrane_id].iloc[0]
@@ -1077,23 +1111,25 @@ with tab3:
                     st.rerun()
 
         st.divider()
-        st.subheader("Wszystkie zbiory")
+        st.subheader("Wszystkie zbiory" + ("" if wybrana_miejscowosc == "🌍 Wszystkie miejscowości" else f" — {wybrana_miejscowosc}"))
         st.dataframe(
-            st.session_state.zbiory.drop(columns=["ID", "Zdjęcia"]),
+            zbiory_widoczne.drop(columns=["ID", "Zdjęcia"]),
             hide_index=True, use_container_width=True,
-            height=wysokosc_tabeli(len(st.session_state.zbiory)),
+            height=wysokosc_tabeli(len(zbiory_widoczne)),
             column_config=KONFIG_ZBIORY_EDYCJA,
         )
 
         if edycja:
-            with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo)"):
+            with st.expander("🛠️ Zaawansowane: edytuj bezpośrednio w tabeli (zbiorczo — zawsze pokazuje WSZYSTKIE pola, niezależnie od filtra miejscowości)"):
+                konfig_zbiory_pelne = {**KONFIG_ZBIORY_EDYCJA,
+                                        "Pole": st.column_config.SelectboxColumn(options=wszystkie_nazwy_pol, required=True)}
                 edytowane = st.data_editor(
                     st.session_state.zbiory,
                     hide_index=True,
                     use_container_width=True,
                     num_rows="dynamic",
                     height=wysokosc_tabeli(len(st.session_state.zbiory), wiersz_dodawania=True),
-                    column_config=KONFIG_ZBIORY_EDYCJA,
+                    column_config=konfig_zbiory_pelne,
                     column_order=["Pole", "Data planowana", "Data zbioru", "Plon (t/ha)",
                                   "Wilgotność (%)", "Cena (zł/t)", "Zrealizowane?", "Notatka"],
                     key=f"edytor_zbiory_{st.session_state.wersja_edytorow}",
@@ -1106,7 +1142,7 @@ with tab3:
         st.subheader("Plon i przychód")
         pow_mapa = df_pola_aktywne.set_index("Nazwa pola")["Powierzchnia (ha)"].to_dict()
         wiersze = []
-        for _, w in st.session_state.zbiory.iterrows():
+        for _, w in zbiory_widoczne.iterrows():
             powierzchnia = pow_mapa.get(w["Pole"], 0.0)
             plon_t_ha = w["Plon (t/ha)"] if pd.notna(w["Plon (t/ha)"]) else None
             cena = w["Cena (zł/t)"] if pd.notna(w["Cena (zł/t)"]) else 0
@@ -1157,17 +1193,17 @@ with tab3:
 # ======================================================================
 
 with tab4:
-    st.subheader("Nadchodzące i zaległe prace")
+    st.subheader("Nadchodzące i zaległe prace" + ("" if wybrana_miejscowosc == "🌍 Wszystkie miejscowości" else f" — {wybrana_miejscowosc}"))
 
     wpisy = []
-    for _, w in st.session_state.zabiegi.iterrows():
+    for _, w in zabiegi_widoczne.iterrows():
         if w["Wykonano?"]:
             continue
         if pd.notna(w["Data planowana"]):
             wpisy.append({"Data": w["Data planowana"], "Pole": w["Pole"],
                           "Co": f"{IKONY_TYP.get(w['Typ'], '📌')} {w['Typ']} — {w['Środek/Nawóz']}",
                           "Rodzaj": "Zabieg"})
-    for _, w in st.session_state.zbiory.iterrows():
+    for _, w in zbiory_widoczne.iterrows():
         if w["Zrealizowane?"]:
             continue
         if pd.notna(w["Data planowana"]):
@@ -1198,13 +1234,13 @@ with tab4:
     st.divider()
     st.subheader("Wszystkie prace na osi czasu")
     wszystkie = []
-    for _, w in st.session_state.zabiegi.iterrows():
+    for _, w in zabiegi_widoczne.iterrows():
         if pd.notna(w["Data planowana"]):
             wszystkie.append({"Pole": w["Pole"], "Start": w["Data planowana"],
                               "Koniec": w["Data planowana"] + timedelta(days=1),
                               "Zadanie": f"{w['Typ']} — {w['Środek/Nawóz']}",
                               "Status": "Wykonano" if w["Wykonano?"] else "Planowane"})
-    for _, w in st.session_state.zbiory.iterrows():
+    for _, w in zbiory_widoczne.iterrows():
         if pd.notna(w["Data planowana"]):
             wszystkie.append({"Pole": w["Pole"], "Start": w["Data planowana"],
                               "Koniec": w["Data planowana"] + timedelta(days=1),
@@ -1229,9 +1265,9 @@ with tab4:
 # ======================================================================
 
 with tab5:
-    st.subheader("Podsumowanie finansowe i przegląd upraw")
+    st.subheader("Podsumowanie finansowe i przegląd upraw" + ("" if wybrana_miejscowosc == "🌍 Wszystkie miejscowości" else f" — {wybrana_miejscowosc}"))
 
-    koszt_zabiegow = st.session_state.zabiegi["Koszt (zł)"].fillna(0).sum()
+    koszt_zabiegow = zabiegi_widoczne["Koszt (zł)"].fillna(0).sum()
     _tabela_plonow = globals().get("tabela_plonow")
     if _tabela_plonow is not None and not _tabela_plonow.empty:
         przychod_zbiorow = _tabela_plonow.loc[
@@ -1258,16 +1294,16 @@ with tab5:
             st.plotly_chart(fig1, use_container_width=True)
     with col2:
         st.markdown("##### Koszty zabiegów wg pola")
-        if not st.session_state.zabiegi.empty:
-            wg_pola = st.session_state.zabiegi.groupby("Pole")["Koszt (zł)"].sum().reset_index().sort_values("Koszt (zł)")
+        if not zabiegi_widoczne.empty:
+            wg_pola = zabiegi_widoczne.groupby("Pole")["Koszt (zł)"].sum().reset_index().sort_values("Koszt (zł)")
             fig2 = go.Figure(go.Bar(x=wg_pola["Koszt (zł)"], y=wg_pola["Pole"], orientation="h",
                                      marker_color="#c62828"))
             fig2.update_layout(margin=dict(l=10, r=10, t=10, b=10), height=350, xaxis_title="zł")
             st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("##### Koszty zabiegów wg typu")
-    if not st.session_state.zabiegi.empty:
-        wg_typu = st.session_state.zabiegi.groupby("Typ")["Koszt (zł)"].sum().reset_index().sort_values("Koszt (zł)", ascending=False)
+    if not zabiegi_widoczne.empty:
+        wg_typu = zabiegi_widoczne.groupby("Typ")["Koszt (zł)"].sum().reset_index().sort_values("Koszt (zł)", ascending=False)
         fig3 = go.Figure(go.Bar(x=wg_typu["Typ"], y=wg_typu["Koszt (zł)"], marker_color="#1565c0"))
         fig3.update_layout(margin=dict(l=10, r=10, t=30, b=10), height=350, yaxis_title="zł")
         st.plotly_chart(fig3, use_container_width=True)
@@ -1277,6 +1313,41 @@ with tab5:
         wg_statusu = df_pola_aktywne["Status"].value_counts().reset_index()
         wg_statusu.columns = ["Status", "Liczba pól"]
         st.dataframe(wg_statusu, hide_index=True, use_container_width=True)
+
+    if wybrana_miejscowosc == "🌍 Wszystkie miejscowości" and not df_pola_wszystkie.empty:
+        st.divider()
+        st.markdown("##### 🏘️ Porównanie miejscowości")
+        pole_do_miejsca = df_pola_wszystkie.set_index("Nazwa pola")["Miejscowość"].to_dict()
+        wiersze_miejsc = []
+        for miejsce, grupa_pol in df_pola_wszystkie.groupby("Miejscowość"):
+            nazwy_w_miejscu = set(grupa_pol["Nazwa pola"])
+            zabiegi_m = st.session_state.zabiegi[st.session_state.zabiegi["Pole"].isin(nazwy_w_miejscu)]
+            zbiory_m = st.session_state.zbiory[st.session_state.zbiory["Pole"].isin(nazwy_w_miejscu)]
+            koszt_m = zabiegi_m["Koszt (zł)"].fillna(0).sum()
+            przychod_m = 0.0
+            for _, w in zbiory_m.iterrows():
+                if not w["Zrealizowane?"]:
+                    continue
+                plon = w["Plon (t/ha)"] if pd.notna(w["Plon (t/ha)"]) else 0
+                cena = w["Cena (zł/t)"] if pd.notna(w["Cena (zł/t)"]) else 0
+                pow_pola = pole_do_miejsca and grupa_pol.set_index("Nazwa pola")["Powierzchnia (ha)"].get(w["Pole"], 0)
+                przychod_m += plon * cena * (pow_pola or 0)
+            wiersze_miejsc.append({
+                "Miejscowość": miejsce, "Liczba pól": len(grupa_pol),
+                "Areał (ha)": grupa_pol["Powierzchnia (ha)"].sum(),
+                "Koszt zabiegów (zł)": koszt_m, "Przychód zrealizowany (zł)": przychod_m,
+                "Bilans (zł)": przychod_m - koszt_m,
+            })
+        tabela_miejsc = pd.DataFrame(wiersze_miejsc).sort_values("Areał (ha)", ascending=False)
+        st.dataframe(
+            tabela_miejsc, hide_index=True, use_container_width=True,
+            column_config={
+                "Areał (ha)": st.column_config.NumberColumn(format="%.2f"),
+                "Koszt zabiegów (zł)": st.column_config.NumberColumn(format="%.2f zł"),
+                "Przychód zrealizowany (zł)": st.column_config.NumberColumn(format="%.2f zł"),
+                "Bilans (zł)": st.column_config.NumberColumn(format="%.2f zł"),
+            },
+        )
 
 
 # ======================================================================
@@ -1308,7 +1379,8 @@ with tab6:
                     if bajty:
                         st.image(bajty, use_container_width=True)
 
-        c1, c2, c3, c4 = st.columns(4)
+        c0, c1, c2, c3, c4 = st.columns(5)
+        c0.metric("📍 Miejscowość", pole_kp["Miejscowość"])
         c1.metric("📐 Powierzchnia", f"{pole_kp['Powierzchnia (ha)']:.2f} ha")
         c2.metric("🌾 Uprawa", pole_kp["Rodzaj uprawy"])
         c3.metric("📌 Status", pole_kp["Status"])
